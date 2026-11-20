@@ -1,0 +1,47 @@
+// ============================================================================
+// uvlo_fault.va  -  UVLO + start-up delay, produces the `fault` stop reason
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Alex         Level: L1/L2 behavioral
+// Pins:  vin   (in)  input supply
+//        fault (out) 1 = stop the clock (UVLO active or start-up delay not done)
+//        vdd, vss    logic supply
+//
+// Behavior:
+//   - fault starts at 1 (power-on).
+//   - fault -> 0 a delay `tdelay` after Vin rises above v_on (stand-in for
+//     soft-start / bias settling; Alex's real soft-start replaces this).
+//   - fault -> 1 immediately when Vin falls below v_off (UVLO).
+//
+// Not modeled yet (add as separate stop reasons OR'd into `fault` when needed):
+//   overcurrent protection (OCP), a real soft-start ramp, power-on reset of
+//   gate nodes. The design notes say these are the easiest blocks to cut; if
+//   cut, they stay as Verilog-A so tests T1 and T5 remain complete.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module uvlo_fault (vin, fault, vdd, vss);
+  input vin; output fault; inout vdd, vss;
+  electrical vin, fault, vdd, vss;
+
+  parameter real v_on   = 0.58  from (0:inf);   // must allow operation at Vin = 0.6 V
+  parameter real v_off  = 0.55  from (0:inf);
+  parameter real tdelay = 2u    from [0:inf);
+  parameter real t_never = 1.0  from (0:inf);   // "no event" time; keep > sim stop time
+  parameter real tr     = 50p   from (0:inf);
+
+  integer f;
+  real t_ok;
+
+  analog begin
+    @(initial_step) begin
+      f = 1;
+      t_ok = (V(vin, vss) > v_on) ? tdelay : t_never;
+    end
+    @(cross(V(vin, vss) - v_on, +1))  t_ok = $abstime + tdelay;
+    @(timer(t_ok))                    if (V(vin, vss) > v_off) f = 0;
+    @(cross(V(vin, vss) - v_off, -1)) begin f = 1; t_ok = t_never; end
+
+    V(fault, vss) <+ V(vdd, vss) * transition(f, 0, tr);
+  end
+endmodule

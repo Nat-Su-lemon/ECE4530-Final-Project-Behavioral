@@ -1,0 +1,85 @@
+// ============================================================================
+// pwr_avg.va  -  AVERAGED power stage + VCO law (behavioral, loop-level)
+// ----------------------------------------------------------------------------
+// Owner: shared (loop-level model for Brandon, Sam, Nathaniel)   Level: L1
+// Pins:  vin, vout (inout) power terminals (ground = vss)
+//        vctrl     (in)    error-amp output; converted to fsw with the SAME law as vco.va
+//        hold_req  (in)    1 = clock stopped (no charge delivered)
+//        fault     (in)    1 = clock stopped
+//        mt_half, mt_x2 (in) mode_target bits (same meaning as mode_route)
+//        vdd, vss          logic supply / ground
+//
+// What it is: the whole switched network replaced by its average behavior,
+// a Thevenin source (m*Vin behind Rout) on the output and m*Iout drawn from the input.
+// No switching ripple, no clock, so a millisecond-long loop simulation takes seconds.
+// Use it to tune compensation (Brandon), mode thresholds (Sam), and Cfly/fsw (Nathaniel).
+//
+// Equations (design notes p.7-8):
+//   m    = 2 (x2), 1 (x1), 0.5 (x1/2)          k = 1, 1, 4
+//   Rssl = 1 / (k * fsw * Cfly)                 Rfsl = 2 * Ron(Vin)
+//   Rout = sqrt(Rssl^2 + Rfsl^2)
+//   Iout = (m*Vin - Vout) / Rout   while running, 0 while hold_req or fault
+//   Iin  = m*Iout + cg_tot*Vin*fsw   (second term = gate-drive loss)
+//
+// Simplifications: mode changes instantly (no latch, no stop cycle), the
+// stop-cycle burst behavior is averaged, current can flow backward if Vout > m*Vin.
+// The switched L2 model (clk_gen + 5x pwr_sw) is the reference for all of that.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module pwr_avg (vin, vout, vctrl, hold_req, fault, mt_half, mt_x2, vdd, vss);
+  inout vin, vout; input vctrl, hold_req, fault, mt_half, mt_x2; inout vdd, vss;
+  electrical vin, vout, vctrl, hold_req, fault, mt_half, mt_x2, vdd, vss;
+
+  // power stage
+  parameter real cfly     = 6.8n  from (0:inf);
+  parameter real ron_full = 0.5   from (0:inf);
+  parameter real vth_sw   = 0.4   from [0:inf);
+  parameter real vnom     = 1.0   from (0:inf);
+  parameter real vov_min  = 0.05  from (0:inf);
+  parameter real cg_tot   = 0     from [0:inf);   // total switched gate cap per cycle (loss)
+  // VCO law: keep identical to vco.va
+  parameter real fsw_min  = 100k  from (0:inf);
+  parameter real fsw_max  = 20M   from (0:inf);
+  parameter real vlo      = 0.0;
+  parameter real vhi      = 1.0;
+  parameter integer law   = 0 from [0:1];
+  // smoothing of digital events (keeps the simulator happy)
+  parameter real tsm      = 10n   from (0:inf);
+
+  integer mode, run;
+  real vth, u, fsw, vdrive, ron, mval, kval, rssl, rfsl, rout, iout, runs;
+
+  analog begin
+    vth = V(vdd, vss) / 2;
+
+    // VCO law (same as vco.va)
+    u = min(max((V(vctrl, vss) - vlo) / (vhi - vlo), 0.0), 1.0);
+    if (law == 0)
+      fsw = fsw_min + (fsw_max - fsw_min) * u;
+    else
+      fsw = fsw_min * exp(ln(fsw_max / fsw_min) * u);
+
+    // mode and run state, updated on clean events
+    @(initial_step or cross(V(mt_half, vss) - vth, 0) or cross(V(mt_x2, vss) - vth, 0))
+      mode = (V(mt_half, vss) > vth) ? 1 : ((V(mt_x2, vss) > vth) ? 2 : 0);
+    @(initial_step or cross(V(hold_req, vss) - vth, 0) or cross(V(fault, vss) - vth, 0))
+      run = !((V(hold_req, vss) > vth) || (V(fault, vss) > vth));
+
+    mval = transition((mode == 2) ? 2.0 : ((mode == 1) ? 0.5 : 1.0), 0, tsm);
+    kval = transition((mode == 1) ? 4.0 : 1.0, 0, tsm);
+    runs = transition(run, 0, tsm);
+
+    vdrive = min(V(vin, vss), vnom);
+    ron    = ron_full * (vnom - vth_sw) / max(vdrive - vth_sw, vov_min);
+    rssl   = 1.0 / (kval * fsw * cfly);
+    rfsl   = 2.0 * ron;
+    rout   = sqrt(rssl * rssl + rfsl * rfsl);
+
+    iout = runs * (mval * V(vin, vss) - V(vout, vss)) / rout;
+
+    I(vss, vout) <+ iout;                                        // delivered into vout
+    I(vin, vss)  <+ mval * iout + runs * cg_tot * V(vin, vss) * fsw;   // drawn from vin
+  end
+endmodule

@@ -1,0 +1,42 @@
+// ============================================================================
+// hold_cmp.va  -  Hold comparator (light-load / over-voltage stop request)
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Brandon      Level: L1/L2 behavioral
+// Pins:  vout_sense (in)  output voltage feedback
+//        vref       (in)  reference
+//        hold_req   (out) 1 = Vout is above target -> en_hold stops the clock
+//        vdd, vss         supply
+//
+// Why it exists: the VCO cannot go below fsw_min, so at light load it still
+// delivers more charge than needed and Vout rises. The error amp is then pinned
+// at vmin and can do nothing more. This comparator stops the clock until Vout
+// falls, so the converter runs in bursts (design notes p.9).
+//
+// Thresholds sit slightly ABOVE vref so the comparator does not fight the
+// error amp during normal (non-burst) regulation:
+//   hold_req -> 1 when vout_sense > vref + v_ofs + hyst/2
+//   hold_req -> 0 when vout_sense < vref + v_ofs - hyst/2
+// Ripple in burst mode = hyst + one charge-transfer step (budget: 10 mV total).
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module hold_cmp (vout_sense, vref, hold_req, vdd, vss);
+  input vout_sense, vref; output hold_req; inout vdd, vss;
+  electrical vout_sense, vref, hold_req, vdd, vss;
+
+  parameter real v_ofs = 5m   from [0:inf);   // offset above vref (placeholder)
+  parameter real hyst  = 2m   from [0:inf);   // total hysteresis  (placeholder)
+  parameter real td    = 2n   from [0:inf);   // comparator delay
+  parameter real tr    = 50p  from (0:inf);
+
+  integer h;
+
+  analog begin
+    @(initial_step) h = (V(vout_sense, vss) > V(vref, vss) + v_ofs);
+    @(cross(V(vout_sense, vss) - (V(vref, vss) + v_ofs + hyst/2), +1)) h = 1;
+    @(cross(V(vout_sense, vss) - (V(vref, vss) + v_ofs - hyst/2), -1)) h = 0;
+
+    V(hold_req, vss) <+ V(vdd, vss) * transition(h, td, tr);
+  end
+endmodule

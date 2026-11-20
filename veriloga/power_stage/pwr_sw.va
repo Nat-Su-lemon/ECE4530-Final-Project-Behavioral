@@ -1,0 +1,61 @@
+// ============================================================================
+// pwr_sw.va  -  One power switch INCLUDING its gate driver (behavioral)
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Nathaniel    Level: L2 non-ideal behavioral
+// Pins:  p, n  (inout) the two power terminals (switch is bidirectional)
+//        ctl   (in)    logic control from mode_route (ctl_a..ctl_e)
+//        vdrv  (in)    gate-drive supply the driver has available. In the MVP
+//                      testbench tie it to vin; it sets Ron and gate-drive loss.
+//        vdd, vss      logic supply (sets the ctl threshold = V(vdd,vss)/2)
+//
+// Models : - Ron that rises at low drive (design notes p.7):
+//              Ron = ron_full * (vnom - vth) / (min(V(vdrv), vnom) - vth)
+//          - Roff leakage, optional Coff across p-n
+//          - driver delay td (use it to test the dead-time budget) and switching time tsw
+//          - gate-drive loss: charge cg*V(vdrv) drawn from vdrv at every turn-on,
+//            so P = cg * Vdrv^2 * fsw shows up in the input power (efficiency tests)
+// Ignores: real boosted/bootstrapped gate rails, body diode, Vgs/Vds limits,
+//          level-shifter behavior. Those are exactly what the real circuit adds.
+//
+// Why driver + switch are ONE cell: the swap boundary is the logic ctl signal.
+// In L3 Nathaniel draws a schematic view with the same pins containing the
+// level shifter / driver and the nMOS, and can split it internally however he
+// wants. If the real version needs extra pins (boost rail, bootstrap cap),
+// add them to BOTH views at the same time. See DEC-011.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module pwr_sw (p, n, ctl, vdrv, vdd, vss);
+  inout p, n; input ctl, vdrv; inout vdd, vss;
+  electrical p, n, ctl, vdrv, vdd, vss;
+
+  parameter real ron_full = 0.5   from (0:inf);  // Ron at full drive (design notes: 0.5 ohm)
+  parameter real vth_sw   = 0.4   from [0:inf);  // switch threshold (check PDK)
+  parameter real vnom     = 1.0   from (0:inf);  // drive above this does not lower Ron further
+  parameter real vov_min  = 0.05  from (0:inf);  // floor on overdrive, avoids divide-by-zero
+  parameter real roff     = 1G    from (0:inf);
+  parameter real coff     = 0     from [0:inf);  // p-n capacitance, set from device size later
+  parameter real td       = 0     from [0:inf);  // driver delay ctl -> switch
+  parameter real tsw      = 200p  from (0:inf);  // on/off transition time
+  parameter real cg       = 0     from [0:inf);  // effective gate capacitance for loss (0 = off)
+
+  integer s;
+  real vth, vdrive, ron, gon, son;
+
+  analog begin
+    vth = V(vdd, vss) / 2;
+    @(initial_step) s = (V(ctl, vss) > vth);
+    @(cross(V(ctl, vss) - vth, +1)) s = 1;
+    @(cross(V(ctl, vss) - vth, -1)) s = 0;
+
+    vdrive = min(V(vdrv, vss), vnom);
+    ron    = ron_full * (vnom - vth_sw) / max(vdrive - vth_sw, vov_min);
+    gon    = 1.0 / ron;
+    son    = transition(s, td, tsw);          // 0 = off ... 1 = on
+
+    I(p, n)      <+ V(p, n) * (1.0/roff + (gon - 1.0/roff) * son);
+    I(p, n)      <+ coff * ddt(V(p, n));
+    I(vdrv, vss) <+ cg * V(vdrv, vss) * max(ddt(son), 0.0);   // charge only on turn-on
+  end
+endmodule

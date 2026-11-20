@@ -1,0 +1,42 @@
+// ============================================================================
+// l1_core.scs  -  L1 LOOP-LEVEL CORE: averaged power stage + ideal control
+// ----------------------------------------------------------------------------
+// Included by the tb_L1_*.scs testbenches. Do not simulate this file directly.
+// The testbench must define: parameters (see tb files) and the Vin source,
+// and may add load-step sources. Ground = node 0.
+//
+//   vin --> [pwr_avg] --> vout --+-- Cout --+-- Rload (+ optional Iload step)
+//              ^  ^  ^           |
+//          vctrl hold mode     err_amp / hold_cmp (vs. vref)
+//                  mode_sel (vs. vin)     uvlo_fault (vs. vin) -> fault
+// ============================================================================
+simulator lang=spectre
+global 0
+
+ahdl_include "../../veriloga/power_stage/pwr_avg.va"
+ahdl_include "../../veriloga/control/err_amp.va"
+ahdl_include "../../veriloga/control/hold_cmp.va"
+ahdl_include "../../veriloga/control/mode_sel.va"
+ahdl_include "../../veriloga/support/uvlo_fault.va"
+
+// --- ideal supplies (Alex's LDO / bandgap replace these later) ---
+Vdd   (vdd  0) vsource dc=VDDL
+Vref  (vref 0) vsource dc=VREF
+
+// --- output network ---
+Cout  (vout 0) capacitor c=COUT
+Rload (vout 0) resistor  r=RLOAD
+
+// --- control (Brandon, Sam, Alex) ---
+XUV   (vin fault vdd 0)              uvlo_fault
+XMS   (vin mt_half mt_x2 vdd 0)      mode_sel   v_lo=V_LO v_hi=V_HI hyst=HYST
+XEA   (vout vref vctrl vdd 0)        err_amp    ki=KI kp=KP
+XHC   (vout vref hold_req vdd 0)     hold_cmp   v_ofs=HOLD_OFS hyst=HOLD_HYST
+
+// --- averaged power stage + VCO law ---
+XPS   (vin vout vctrl hold_req fault mt_half mt_x2 vdd 0) pwr_avg \
+        cfly=CFLY ron_full=RON vth_sw=VTH_SW cg_tot=CG_TOT \
+        fsw_min=FSW_MIN fsw_max=FSW_MAX law=LAW
+
+opts options save=selected
+save vin vout vctrl hold_req fault mt_half mt_x2 Vin:p

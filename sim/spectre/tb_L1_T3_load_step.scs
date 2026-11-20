@@ -1,0 +1,16 @@
+// ============================================================================
+// tb_L1_T3_load_step.scs  -  T3 load step 1 <-> 20 mA (L1)
+// Stimulus : Vin = VIN (try 0.6, 2.4, 3.0). Rload gives 1 mA, Istep adds 19 mA.
+// Look at  : Vout undershoot / overshoot and recovery time, vctrl slewing.
+//            This is THE compensation test for Brandon (see 04_control_loop.md).
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters VIN=2.4 TSTOP=10m RLOAD=1k
+
+Vin   (vin 0)  vsource type=pwl wave=[0 0  10u 0  11u VIN]
+Istep (vout 0) isource type=pulse val0=0 val1=19m delay=3m rise=100n fall=100n width=3m period=1
+include "l1_core.scs"
+
+save Istep:p
+tran1 tran stop=TSTOP errpreset=moderate

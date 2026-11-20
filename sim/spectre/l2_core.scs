@@ -1,0 +1,64 @@
+// ============================================================================
+// l2_core.scs  -  L2 SWITCHED CORE: full clock chain + 5 switches + C1 + control
+// ----------------------------------------------------------------------------
+// Included by the tb_L2_*.scs testbenches. Do not simulate this file directly.
+// The testbench must define the Vin source and the test parameters.
+//
+//  vctrl -> vco -> div2 -> nov_gen -> en_hold -> mode_route -> ctl_a..e -> 5x pwr_sw
+//                   ^ rst=stopped     ^ hold_req, fault, mismatch   ^ mt_half, mt_x2
+//
+// Power stage (docs/design/02_power_stage.md):
+//   Sa: vin-c1p   Sb: c1p-vout   Sc: c1n-gnd   Sd: c1n-vin   Se: c1n-vout
+//
+// Checkers print NOV_CHECK / SW_CHECK lines to the log: grep them after every run.
+// ============================================================================
+simulator lang=spectre
+global 0
+
+ahdl_include "../../veriloga/clock_chain/vco.va"
+ahdl_include "../../veriloga/clock_chain/div2.va"
+ahdl_include "../../veriloga/clock_chain/nov_gen.va"
+ahdl_include "../../veriloga/clock_chain/en_hold.va"
+ahdl_include "../../veriloga/clock_chain/mode_route.va"
+ahdl_include "../../veriloga/power_stage/pwr_sw.va"
+ahdl_include "../../veriloga/control/err_amp.va"
+ahdl_include "../../veriloga/control/hold_cmp.va"
+ahdl_include "../../veriloga/control/mode_sel.va"
+ahdl_include "../../veriloga/support/uvlo_fault.va"
+ahdl_include "../../veriloga/checkers/nov_check.va"
+ahdl_include "../../veriloga/checkers/sw_check.va"
+
+// --- ideal supplies ---
+Vdd   (vdd  0) vsource dc=VDDL
+Vref  (vref 0) vsource dc=VREF
+
+// --- clock generation chain (Sam) ---
+XVCO  (vctrl clk vdd 0)                     vco      fsw_min=FSW_MIN fsw_max=FSW_MAX law=LAW
+XDIV  (clk stopped q qb vdd 0)              div2
+XNOV  (q phi1u phi2u vdd 0)                 nov_gen  tdead=TDEAD
+XEN   (clk phi1u phi2u hold_req fault mismatch phi1 phi2 stopped vdd 0) en_hold
+XMR   (phi1 phi2 stopped mt_half mt_x2 ctl_a ctl_b ctl_c ctl_d ctl_e mismatch vdd 0) mode_route
+
+// --- power stage (Nathaniel). vdrv tied to vin: Ron(Vin) and gate loss come from Vin ---
+XSa   (vin c1p  ctl_a vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSb   (c1p vout ctl_b vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSc   (c1n 0    ctl_c vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSd   (c1n vin  ctl_d vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSe   (c1n vout ctl_e vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+C1    (c1p c1n) capacitor c=CFLY
+Cout  (vout 0)  capacitor c=COUT
+Rload (vout 0)  resistor  r=RLOAD
+
+// --- control (Brandon, Sam, Alex) ---
+XUV   (vin fault vdd 0)              uvlo_fault
+XMS   (vin mt_half mt_x2 vdd 0)      mode_sel   v_lo=V_LO v_hi=V_HI hyst=HYST
+XEA   (vout vref vctrl vdd 0)        err_amp    ki=KI kp=KP
+XHC   (vout vref hold_req vdd 0)     hold_cmp   v_ofs=HOLD_OFS hyst=HOLD_HYST
+
+// --- checkers (draw no current) ---
+XNC   (phi1 phi2 vdd 0)                          nov_check tmin=1n
+XSW   (ctl_a ctl_b ctl_c ctl_d ctl_e vdd 0)      sw_check
+
+opts options save=selected
+save vin vout vctrl clk q phi1 phi2 stopped mismatch hold_req fault mt_half mt_x2 \
+     ctl_a ctl_b ctl_c ctl_d ctl_e c1p c1n Vin:p

@@ -1,0 +1,50 @@
+// ============================================================================
+// tb_U2_pwr_open_loop.scs  -  UNIT TEST: power stage alone, ideal phases, no logic
+// ----------------------------------------------------------------------------
+// Two ideal non-overlapping pulse sources (p1, p2) are combined into ctl_a..e
+// with voltage-controlled sources, so the switch network can be tested with zero
+// dependence on the clock chain. Pick the mode with the K* gains:
+//
+//   mode   KC1 KC2 KD KE     expected no-load Vout
+//   x1/2    0   1   0  1     Vin/2
+//   x1      1   1   0  0     Vin       (c = Phi1 + Phi2 = Phi1 OR Phi2)
+//   x2      1   0   1  0     2*Vin
+//   (ctl_a = Phi1 and ctl_b = Phi2 in every mode)
+//
+// Check    : no-load Vout -> m*Vin; with RLOAD, droop matches Rout from
+//            tools/sizing_check.py at the same FSW.
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters VIN=0.6 FSW=10M RLOAD=50 TSTOP=200u \
+           KC1=1 KC2=0 KD=1 KE=0
+
+global 0
+ahdl_include "../../veriloga/power_stage/pwr_sw.va"
+
+Vdd  (vdd 0) vsource dc=VDDL
+Vin  (vin 0) vsource dc=VIN
+// ideal phases: Phi1 high first half (minus dead time), Phi2 second half
+P1   (p1 0)  vsource type=pulse val0=0 val1=VDDL period=1/FSW delay=TDEAD     width=0.5/FSW-TDEAD rise=50p fall=50p
+P2   (p2 0)  vsource type=pulse val0=0 val1=VDDL period=1/FSW delay=0.5/FSW+TDEAD width=0.5/FSW-TDEAD rise=50p fall=50p
+
+// routing built from the two phases
+Ea   (ctl_a 0 p1 0) vcvs gain=1
+Eb   (ctl_b 0 p2 0) vcvs gain=1
+Ec1  (ctl_c mc p1 0) vcvs gain=KC1
+Ec2  (mc 0 p2 0) vcvs gain=KC2
+Ed   (ctl_d 0 p2 0) vcvs gain=KD
+Ee   (ctl_e 0 p1 0) vcvs gain=KE
+
+XSa  (vin c1p  ctl_a vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSb  (c1p vout ctl_b vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSc  (c1n 0    ctl_c vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSd  (c1n vin  ctl_d vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+XSe  (c1n vout ctl_e vin vdd 0) pwr_sw ron_full=RON vth_sw=VTH_SW
+C1   (c1p c1n) capacitor c=CFLY
+Cout (vout 0)  capacitor c=COUT
+Rload (vout 0) resistor  r=RLOAD
+
+opts options save=selected
+save vin vout c1p c1n p1 p2 ctl_a ctl_b ctl_c ctl_d ctl_e Vin:p
+tran1 tran stop=TSTOP errpreset=moderate

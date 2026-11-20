@@ -1,0 +1,15 @@
+// ============================================================================
+// tb_L1_T6_light_load.scs  -  T6 light load (L1)
+// Stimulus : Vin = VIN (try 0.6, 1.2, 2.4), load = 1V / RLOAD (try 20k = 0.05 mA ... 200 = 5 mA)
+// Look at  : vctrl pinned at its floor, hold_req toggling (bursts), Vout ripple in hold.
+//            The averaged model shows the burst envelope only; use L2 for real ripple.
+// Tip      : sweep RLOAD with an ADE parametric run or a Spectre `sweep` statement.
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters VIN=1.2 TSTOP=5m RLOAD=2k
+
+Vin (vin 0) vsource type=pwl wave=[0 0  10u 0  11u VIN]
+include "l1_core.scs"
+
+tran1 tran stop=TSTOP errpreset=moderate

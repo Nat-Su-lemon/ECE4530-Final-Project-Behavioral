@@ -1,0 +1,52 @@
+// ============================================================================
+// err_amp.va  -  Error amplifier with dominant-pole (integrating) compensation
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Brandon      Level: L1/L2 behavioral (ideal stand-in)
+// Pins:  vout_sense (in)  output voltage feedback (MVP: Vout directly)
+//        vref       (in)  reference (MVP: ideal 1.0 V source)
+//        vctrl      (out) frequency command to vco / pwr_avg, clamped to [vmin, vmax]
+//        vdd, vss         supply
+//
+// Transfer:  vctrl = clamp( x + kp*e ),  e = vref - vout_sense,  dx/dt = ki*e
+// The integrator state x lives on an internal node and is CLAMPED to [vmin, vmax]
+// (anti-windup). Without the clamp, x would run far negative during light-load
+// bursts (Vout above target) and the next load step would see a huge undershoot.
+//
+// Defaults are a STARTING POINT, not a design. ki = 2e4 came from a quick
+// averaged-loop check (docs/design/04_control_loop.md, section "First loop
+// observations"): it regulates at every band edge without a large load-step dip.
+// With the linear VCO law the plant gain spreads ~1000x, so expect Brandon to
+// change both ki and kp (and maybe the VCO law). That is what this model is for.
+//
+// Swap target: Brandon's transistor-level error amp + compensation network.
+// If Alex's reference ends up below 1 V, scale vout_sense with a divider in the
+// testbench; this model does not care.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module err_amp (vout_sense, vref, vctrl, vdd, vss);
+  input vout_sense, vref; output vctrl; inout vdd, vss;
+  electrical vout_sense, vref, vctrl, vdd, vss;
+  electrical x;                                  // internal integrator state [V]
+
+  parameter real ki   = 2e4   from [0:inf);      // integrator gain [V/(V*s)]  -- starting point, tune!
+  parameter real kp   = 0.0   from [0:inf);      // proportional gain [V/V] (0 = pure integrator)
+  parameter real vmin = 0.0;                     // vctrl clamp low  (= VCO floor)
+  parameter real vmax = 1.0;                     // vctrl clamp high (= VCO ceiling)
+  parameter real gcl  = 1e6   from (0:inf);      // clamp stiffness [1/s]; higher = harder clamp
+
+  real e, xv;
+
+  analog begin
+    e  = V(vref, vss) - V(vout_sense, vss);
+    xv = V(x, vss);
+
+    // KCL on node x with a 1 F normalized cap:  dx/dt = ki*e - gcl*(amount outside the clamp)
+    I(x, vss) <+ ddt(xv);
+    I(x, vss) <+ -ki * e;
+    I(x, vss) <+ gcl * (max(xv - vmax, 0.0) - max(vmin - xv, 0.0));
+
+    V(vctrl, vss) <+ min(max(xv + kp * e, vmin), vmax);
+  end
+endmodule

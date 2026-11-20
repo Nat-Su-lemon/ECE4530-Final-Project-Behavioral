@@ -1,0 +1,54 @@
+// ============================================================================
+// vco.va  -  Stage 1: voltage-controlled ring oscillator (behavioral)
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Sam          Level: L1/L2 behavioral
+// Pins:  vctrl (in)  frequency command from Brandon's error amp
+//        clk   (out) square wave at the RING frequency = 2 x fsw
+//        vdd, vss    logic supply (output swings vss..vdd)
+//
+// Models : vctrl -> fsw law (linear or exponential), hard floor and ceiling,
+//          clean 50 % square wave. The ring runs at 2*fsw because div2 halves it.
+// Ignores: jitter, supply/temperature sensitivity, startup, real duty error.
+//
+// The SAME vctrl->fsw law (same parameters) is used in power_stage/pwr_avg.va,
+// so the averaged (L1) and switched (L2) models agree. Keep them in sync.
+//
+// Swap target: current-starved 5-inverter ring + V-to-I + bias mirror + clamps
+// + output buffer (design notes p.10). After characterizing the real ring,
+// refit fsw_min / fsw_max / law here so everyone else stays realistic.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module vco (vctrl, clk, vdd, vss);
+  input vctrl; output clk; inout vdd, vss;
+  electrical vctrl, clk, vdd, vss;
+
+  parameter real fsw_min = 100k from (0:inf);   // fsw floor   (design notes: 100 kHz)
+  parameter real fsw_max = 20M  from (0:inf);   // fsw ceiling (design notes: 20 MHz)
+  parameter real vlo     = 0.0;                 // vctrl at the floor
+  parameter real vhi     = 1.0;                 // vctrl at the ceiling
+  parameter integer law  = 0 from [0:1];        // 0 = linear in vctrl, 1 = exponential (log-linear)
+  parameter real tr      = 100p from (0:inf);   // output edge time
+
+  real u, fsw, fring, ph;
+  integer s;
+
+  analog begin
+    u = min(max((V(vctrl, vss) - vlo) / (vhi - vlo), 0.0), 1.0);
+    if (law == 0)
+      fsw = fsw_min + (fsw_max - fsw_min) * u;
+    else
+      fsw = fsw_min * exp(ln(fsw_max / fsw_min) * u);
+    fring = 2.0 * fsw;
+
+    ph = idtmod(fring, 0.0, 1.0, -0.5);      // phase in cycles, wraps in [-0.5, 0.5)
+    $bound_step(0.05 / fring);                // at least 20 time points per ring cycle
+
+    @(initial_step) s = 0;
+    @(cross(ph + 0.25, +1)) s = 1;
+    @(cross(ph - 0.25, +1)) s = 0;
+
+    V(clk, vss) <+ V(vdd, vss) * transition(s, 0, tr);
+  end
+endmodule

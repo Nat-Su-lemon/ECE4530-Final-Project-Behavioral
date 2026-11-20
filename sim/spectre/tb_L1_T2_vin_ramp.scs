@@ -1,0 +1,15 @@
+// ============================================================================
+// tb_L1_T2_vin_ramp.scs  -  T2 Vin ramp 0.6 -> 3 -> 0.6 V at 20 mA (L1)
+// Look at  : mt_half / mt_x2 switch points on the way up vs. down (hysteresis),
+//            Vout dip at each mode change, vctrl staying inside its range
+// Expected : x2 -> x1 near 1.225 V rising, x1 -> x1/2 near 2.425 V rising,
+//            the reverse 50 mV lower on the way down
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters TSTOP=20m RLOAD=50
+
+Vin (vin 0) vsource type=pwl wave=[0 0  10u 0  11u 0.6  1m 0.6  10m 3.0  19m 0.6  20m 0.6]
+include "l1_core.scs"
+
+tran1 tran stop=TSTOP errpreset=moderate

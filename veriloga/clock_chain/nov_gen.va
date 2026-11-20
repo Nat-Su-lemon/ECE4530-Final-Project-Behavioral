@@ -1,0 +1,54 @@
+// ============================================================================
+// nov_gen.va  -  Stage 3: non-overlap generator (behavioral)
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Sam          Level: L1/L2 behavioral
+// Pins:  clk  (in)   div2.q   (Phi1 is the q = 1 half, Phi2 the q = 0 half)
+//        phi1, phi2 (out)  UNGATED non-overlapping phases
+//        vdd, vss    logic supply
+//
+// Behavior: each phase falls immediately on its clk edge; the other phase rises
+// a fixed dead time tdead later. Dead time is independent of frequency.
+//
+//   clk   ____/~~~~~~~~~~~~\____________/~~~~
+//   phi1  ______/~~~~~~~~~~\________________/~~      (rises tdead after clk rises)
+//   phi2  ~~\_______________/~~~~~~~~~~\_____        (rises tdead after clk falls)
+//
+// Constraint: tdead < half the switching period at fsw_max (25 ns at 20 MHz).
+// Dead time must be verified at the SWITCH GATES, not here (driver skew eats it).
+//
+// Swap target: cross-coupled NOR pair with fixed delay cells in the feedback.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module nov_gen (clk, phi1, phi2, vdd, vss);
+  input clk; output phi1, phi2; inout vdd, vss;
+  electrical clk, phi1, phi2, vdd, vss;
+
+  parameter real tdead = 2n  from (0:inf);   // placeholder, budget vs. driver skew
+  parameter real tr    = 50p from (0:inf);
+
+  integer p1, p2, pend;
+  real vth, t_ev;
+
+  analog begin
+    vth = V(vdd, vss) / 2;
+
+    @(initial_step) begin
+      p1 = 0; p2 = 0; t_ev = tdead;
+      pend = (V(clk, vss) > vth) ? 1 : 2;    // start-up: raise the phase matching clk
+    end
+
+    @(cross(V(clk, vss) - vth, +1)) begin p2 = 0; pend = 1; t_ev = $abstime + tdead; end
+    @(cross(V(clk, vss) - vth, -1)) begin p1 = 0; pend = 2; t_ev = $abstime + tdead; end
+
+    @(timer(t_ev)) begin
+      if (pend == 1) p1 = 1;
+      if (pend == 2) p2 = 1;
+      pend = 0;
+    end
+
+    V(phi1, vss) <+ V(vdd, vss) * transition(p1, 0, tr);
+    V(phi2, vss) <+ V(vdd, vss) * transition(p2, 0, tr);
+  end
+endmodule

@@ -1,0 +1,19 @@
+// ============================================================================
+// tb_L2_T4_efficiency.scs  -  efficiency / ripple point at the spec anchor (L2)
+// Stimulus : Vin = VIN (spec anchor 2.4 V), 20 mA. Vin is APPROACHED FROM ABOVE
+//            (3.0 V first, then down to VIN) so the converter is in x1/2. See OPEN-03.
+// Measure  : over the last 50 us:
+//              Pin  = average( -V(vin) * I(Vin:p) )
+//              Pout = average( V(vout)^2 / RLOAD )
+//              eta  = Pout / Pin             (spec: >= 75 %)
+//              ripple = peak-to-peak V(vout)  (spec: <= 10 mV)
+// Set CG_TOT-equivalent gate loss per switch with pwr_sw cg=... once known.
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters VIN=2.4 TSTOP=400u RLOAD=50
+
+Vin (vin 0) vsource type=pwl wave=[0 0  10u 0  11u 3.0  150u 3.0  200u VIN]
+include "l2_core.scs"
+
+tran1 tran stop=TSTOP errpreset=moderate

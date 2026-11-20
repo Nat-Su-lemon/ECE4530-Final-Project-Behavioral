@@ -1,0 +1,47 @@
+// ============================================================================
+// div2.va  -  Stage 2: divide-by-two toggle flip-flop (behavioral)
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Sam          Level: L1/L2 behavioral
+// Pins:  clk  (in)   ring clock from vco (2 x fsw)
+//        rst  (in)   active HIGH. Connect to en_hold.stopped.
+//                    While rst is high, q is held HIGH (= the Phi1 side).
+//        q, qb (out) complementary 50 % duty clocks at fsw
+//        vdd, vss    logic supply
+//
+// Why reset to q = 1: nov_gen makes Phi1 from q = 1. Holding q = 1 while the
+// clock is stopped means the first phase after a restart is always Phi1
+// (design notes p.11, "the first edge after any restart always begins Phi1").
+// See docs/process/DECISIONS.md DEC-009.
+//
+// Models : toggle on rising clk, clk-to-q delay, async preset.
+// Ignores: setup/hold, metastability, supply dependence.
+// Swap target: standard-cell DFF with QB fed back to D, plus a set/preset input.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module div2 (clk, rst, q, qb, vdd, vss);
+  input clk, rst; output q, qb; inout vdd, vss;
+  electrical clk, rst, q, qb, vdd, vss;
+
+  parameter real td = 50p from [0:inf);   // clk-to-q delay
+  parameter real tr = 50p from (0:inf);
+
+  integer s, r;
+  real vth;
+
+  analog begin
+    vth = V(vdd, vss) / 2;
+
+    @(initial_step) begin
+      r = (V(rst, vss) > vth);
+      s = 1;
+    end
+    @(cross(V(rst, vss) - vth, +1)) begin r = 1; s = 1; end
+    @(cross(V(rst, vss) - vth, -1)) r = 0;
+    @(cross(V(clk, vss) - vth, +1)) if (!r) s = !s;
+
+    V(q,  vss) <+ V(vdd, vss) * transition(s,  td, tr);
+    V(qb, vss) <+ V(vdd, vss) * transition(!s, td, tr);
+  end
+endmodule

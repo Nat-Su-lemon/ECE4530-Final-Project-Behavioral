@@ -1,0 +1,45 @@
+// ============================================================================
+// tb_U1_clk_chain.scs  -  UNIT TEST: clock chain alone (no power stage)
+// ----------------------------------------------------------------------------
+// Stimulus : vctrl fixed (VCTRL), and scripted stop reasons / mode targets:
+//              hold_req pulses (burst behavior), fault pulse, mode_target changes
+//              x1 -> x1/2 -> x2 -> x1 while running.
+// Check    : - fsw = f(VCTRL) per the VCO law (measure q frequency)
+//            - NOV_CHECK: 0 overlaps, min dead time ~= TDEAD
+//            - SW_CHECK : 0 violations
+//            - every restart begins with Phi1, no runt pulses
+//            - mode changes only while stopped = 1, mismatch clears after the latch
+//            - ctl_a..e follow the routing table for each mode
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters VCTRL=0.5 TSTOP=12u
+
+global 0
+ahdl_include "../../veriloga/clock_chain/vco.va"
+ahdl_include "../../veriloga/clock_chain/div2.va"
+ahdl_include "../../veriloga/clock_chain/nov_gen.va"
+ahdl_include "../../veriloga/clock_chain/en_hold.va"
+ahdl_include "../../veriloga/clock_chain/mode_route.va"
+ahdl_include "../../veriloga/checkers/nov_check.va"
+ahdl_include "../../veriloga/checkers/sw_check.va"
+
+Vdd   (vdd 0)      vsource dc=VDDL
+Vc    (vctrl 0)    vsource dc=VCTRL
+// stop reasons
+Vhold (hold_req 0) vsource type=pwl wave=[0 0  3u 0  3.01u VDDL  3.5u VDDL  3.51u 0  4u 0  4.01u VDDL  5u VDDL  5.01u 0]
+Vflt  (fault 0)    vsource type=pwl wave=[0 VDDL  0.5u VDDL  0.51u 0  9u 0  9.01u VDDL  9.6u VDDL  9.61u 0]
+// mode_target: x1 until 6us, x1/2 until 7.5us, x2 until 10.5us, then x1
+Vmh   (mt_half 0)  vsource type=pwl wave=[0 0  6u 0  6.01u VDDL  7.5u VDDL  7.51u 0]
+Vm2   (mt_x2 0)    vsource type=pwl wave=[0 0  7.5u 0  7.51u VDDL  10.5u VDDL  10.51u 0]
+
+XVCO  (vctrl clk vdd 0)                     vco      fsw_min=FSW_MIN fsw_max=FSW_MAX law=LAW
+XDIV  (clk stopped q qb vdd 0)              div2
+XNOV  (q phi1u phi2u vdd 0)                 nov_gen  tdead=TDEAD
+XEN   (clk phi1u phi2u hold_req fault mismatch phi1 phi2 stopped vdd 0) en_hold
+XMR   (phi1 phi2 stopped mt_half mt_x2 ctl_a ctl_b ctl_c ctl_d ctl_e mismatch vdd 0) mode_route
+
+XNC   (phi1 phi2 vdd 0)                     nov_check tmin=1n
+XSW   (ctl_a ctl_b ctl_c ctl_d ctl_e vdd 0) sw_check
+
+tran1 tran stop=TSTOP errpreset=moderate

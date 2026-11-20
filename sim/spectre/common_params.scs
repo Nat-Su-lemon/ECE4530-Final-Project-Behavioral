@@ -1,0 +1,19 @@
+// ============================================================================
+// common_params.scs  -  ONE place for the shared numbers (design notes values)
+// ----------------------------------------------------------------------------
+// Included first by every tb_*.scs. Spectre does not allow a parameter to be
+// defined twice, so test-specific values (VIN, RLOAD, TSTOP...) live in each
+// testbench instead. To change a shared number, change it HERE (or in ADE).
+// Every number here is a placeholder until the owner replaces it; see
+// docs/design/02_power_stage.md and tools/sizing_check.py.
+// ============================================================================
+simulator lang=spectre
+
+parameters \
+  VDDL=1.0      VREF=1.0 \
+  CFLY=6.8n     COUT=1.5u      RON=0.5     VTH_SW=0.4   CG_TOT=0 \
+  FSW_MIN=100k  FSW_MAX=20M    LAW=0 \
+  V_LO=1.2      V_HI=2.4       HYST=50m \
+  KI=2e4         KP=0 \
+  HOLD_OFS=5m   HOLD_HYST=2m \
+  TDEAD=2n

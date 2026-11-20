@@ -1,0 +1,86 @@
+// ============================================================================
+// mode_route.va  -  Stage 5: mode latch and switch routing (behavioral)
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Sam          Level: L1/L2 behavioral
+// Pins:  phi1, phi2 (in)  GATED phases from en_hold
+//        stopped    (in)  from en_hold. The latch is transparent only while high.
+//        mt_half    (in)  mode_target bit: 1 = want x1/2 (step-down). Has priority.
+//        mt_x2      (in)  mode_target bit: 1 = want x2   (step-up)
+//                          both low = want x1
+//        ctl_a..ctl_e (out) one logic control per power switch (to gate drivers)
+//        mismatch   (out) 1 = mode_target differs from the latched mode -> en_hold stops
+//        vdd, vss         logic supply
+//
+// Latched mode code (internal integer):  0 = x1,  1 = x1/2,  2 = x2
+//
+// Routing (design notes p.6), all derived from phases:
+//          x1/2   x1          x2
+//   ctl_a  Phi1   Phi1        Phi1
+//   ctl_b  Phi2   Phi2        Phi2
+//   ctl_c  Phi2   Phi1|Phi2   Phi1
+//   ctl_d  off    off         Phi2
+//   ctl_e  Phi1   off         off
+// When the clock is stopped both phases are low, so all five switches are off
+// automatically. No special "parked" state is needed.
+//
+// Mode change: mode_target changes -> mismatch = 1 -> en_hold stops in the next
+// gap -> stopped = 1 -> latch takes the new mode -> mismatch = 0 -> restart at Phi1.
+// Because the latch changes only while stopped, d and e can never conduct together.
+//
+// Swap target: 2-bit D-latch enabled by stopped, AND/OR routing, XOR compare.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module mode_route (phi1, phi2, stopped, mt_half, mt_x2,
+                   ctl_a, ctl_b, ctl_c, ctl_d, ctl_e, mismatch, vdd, vss);
+  input phi1, phi2, stopped, mt_half, mt_x2;
+  output ctl_a, ctl_b, ctl_c, ctl_d, ctl_e, mismatch;
+  inout vdd, vss;
+  electrical phi1, phi2, stopped, mt_half, mt_x2;
+  electrical ctl_a, ctl_b, ctl_c, ctl_d, ctl_e, mismatch, vdd, vss;
+
+  parameter real tr = 50p from (0:inf);
+
+  integer p1, p2, stp, req, mode;
+  integer xa, xb, xc, xd, xe;
+  real vth;
+
+  analog begin
+    vth = V(vdd, vss) / 2;
+
+    // requested mode from mode_target:  0 = x1, 1 = x1/2, 2 = x2   (x1/2 has priority)
+    req = (V(mt_half, vss) > vth) ? 1 : ((V(mt_x2, vss) > vth) ? 2 : 0);
+
+    @(initial_step) begin
+      p1 = 0; p2 = 0;
+      stp = (V(stopped, vss) > vth);
+      mode = req;                             // power-on: start in the requested mode
+    end
+
+    @(cross(V(phi1, vss) - vth, +1)) p1 = 1;
+    @(cross(V(phi1, vss) - vth, -1)) p1 = 0;
+    @(cross(V(phi2, vss) - vth, +1)) p2 = 1;
+    @(cross(V(phi2, vss) - vth, -1)) p2 = 0;
+
+    // latch: transparent only while stopped
+    @(cross(V(stopped, vss) - vth, +1)) begin stp = 1; mode = req; end
+    @(cross(V(stopped, vss) - vth, -1)) stp = 0;
+    @(cross(V(mt_half, vss) - vth, 0) or cross(V(mt_x2, vss) - vth, 0))
+      if (stp) mode = req;
+
+    // routing table
+    xa = p1;
+    xb = p2;
+    xc = (mode == 1) ? p2 : ((mode == 0) ? (p1 || p2) : p1);
+    xd = (mode == 2) && p2;
+    xe = (mode == 1) && p1;
+
+    V(ctl_a,    vss) <+ V(vdd, vss) * transition(xa, 0, tr);
+    V(ctl_b,    vss) <+ V(vdd, vss) * transition(xb, 0, tr);
+    V(ctl_c,    vss) <+ V(vdd, vss) * transition(xc, 0, tr);
+    V(ctl_d,    vss) <+ V(vdd, vss) * transition(xd, 0, tr);
+    V(ctl_e,    vss) <+ V(vdd, vss) * transition(xe, 0, tr);
+    V(mismatch, vss) <+ V(vdd, vss) * transition(req != mode, 0, tr);
+  end
+endmodule

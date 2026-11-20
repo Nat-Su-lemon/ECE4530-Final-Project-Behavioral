@@ -1,0 +1,53 @@
+// ============================================================================
+// mode_sel.va  -  Mode select: two Vin comparators with hysteresis
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Sam          Level: L1/L2 behavioral
+// Pins:  vin_sense (in)  input voltage (MVP: Vin directly; real circuit uses a divider)
+//        mt_half   (out) mode_target bit, 1 = x1/2 (Vin high)
+//        mt_x2     (out) mode_target bit, 1 = x2   (Vin low)
+//        vdd, vss        logic supply
+//
+//    Vin:   0.6 ....... v_lo ............ v_hi ....... 3.0
+//    mode:  |--- x2 ---|------ x1 -------|--- x1/2 ---|
+//
+// Each threshold has total hysteresis `hyst`, centred on the threshold:
+//   mt_x2   -> 1 when Vin < v_lo - hyst/2,   -> 0 when Vin > v_lo + hyst/2
+//   mt_half -> 1 when Vin > v_hi + hyst/2,   -> 0 when Vin < v_hi - hyst/2
+// Rule from the design notes (p.7): a mode is allowed once its ideal output is
+// >= 20 % above Vout, which gives v_lo = 1.2 V and v_hi = 2.4 V, ~50 mV hysteresis.
+//
+// WARNING: the efficiency anchor (75 % at Vin = 2.4 V) sits on v_hi. Coming from
+// below, 2.4 V is still x1 (ideal efficiency only ~42 %). See OPEN-03 in
+// docs/process/OPEN_ISSUES.md.
+//
+// Output is a LEVEL (not a pulse), as the interface requires.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module mode_sel (vin_sense, mt_half, mt_x2, vdd, vss);
+  input vin_sense; output mt_half, mt_x2; inout vdd, vss;
+  electrical vin_sense, mt_half, mt_x2, vdd, vss;
+
+  parameter real v_lo = 1.2   from (0:inf);   // x2 / x1 boundary
+  parameter real v_hi = 2.4   from (0:inf);   // x1 / x1/2 boundary
+  parameter real hyst = 50m   from [0:inf);   // total hysteresis per comparator
+  parameter real td   = 5n    from [0:inf);
+  parameter real tr   = 50p   from (0:inf);
+
+  integer h, l;
+
+  analog begin
+    @(initial_step) begin
+      h = (V(vin_sense, vss) > v_hi);
+      l = (V(vin_sense, vss) < v_lo);
+    end
+    @(cross(V(vin_sense, vss) - (v_hi + hyst/2), +1)) h = 1;
+    @(cross(V(vin_sense, vss) - (v_hi - hyst/2), -1)) h = 0;
+    @(cross(V(vin_sense, vss) - (v_lo - hyst/2), -1)) l = 1;
+    @(cross(V(vin_sense, vss) - (v_lo + hyst/2), +1)) l = 0;
+
+    V(mt_half, vss) <+ V(vdd, vss) * transition(h, td, tr);
+    V(mt_x2,   vss) <+ V(vdd, vss) * transition(l, td, tr);
+  end
+endmodule

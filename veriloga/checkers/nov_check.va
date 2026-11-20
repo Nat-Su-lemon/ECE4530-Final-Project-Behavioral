@@ -1,0 +1,58 @@
+// ============================================================================
+// nov_check.va  -  TEST ONLY: non-overlap / dead-time monitor for one signal pair
+// ----------------------------------------------------------------------------
+// Pins:  sig1, sig2 (in)  any two signals that must never be high together
+//                         (phi1/phi2 at nov_gen output, or two gate nodes later)
+//        vdd, vss         reference for the threshold V(vdd,vss)/2
+//
+// Prints to the Spectre log (grep for NOV_CHECK):
+//   - every overlap (one rises while the other is still high)
+//   - at the end: overlap count, count of dead times shorter than tmin, minimum dead time
+// It draws no current, so it can be left in every testbench.
+//
+// For gate nodes that do not swing vss..vdd, set vth_abs > 0 to use a fixed threshold.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module nov_check (sig1, sig2, vdd, vss);
+  input sig1, sig2; inout vdd, vss;
+  electrical sig1, sig2, vdd, vss;
+
+  parameter real tmin    = 1n;      // flag dead times shorter than this
+  parameter real vth_abs = 0;       // 0 = use V(vdd,vss)/2, otherwise fixed threshold [V]
+
+  integer nov, nshort;
+  real vth, tf1, tf2, dmin;
+
+  analog begin
+    vth = (vth_abs > 0) ? vth_abs : V(vdd, vss) / 2;
+
+    @(initial_step) begin nov = 0; nshort = 0; tf1 = -1; tf2 = -1; dmin = 1.0; end
+
+    @(cross(V(sig1, vss) - vth, -1)) tf1 = $abstime;
+    @(cross(V(sig2, vss) - vth, -1)) tf2 = $abstime;
+
+    @(cross(V(sig1, vss) - vth, +1)) begin
+      if (V(sig2, vss) > vth) begin
+        nov = nov + 1;
+        $strobe("NOV_CHECK %m: overlap, sig1 rose while sig2 high at t=%g", $abstime);
+      end else if (tf2 >= 0) begin
+        dmin = min(dmin, $abstime - tf2);
+        if ($abstime - tf2 < tmin) nshort = nshort + 1;
+      end
+    end
+    @(cross(V(sig2, vss) - vth, +1)) begin
+      if (V(sig1, vss) > vth) begin
+        nov = nov + 1;
+        $strobe("NOV_CHECK %m: overlap, sig2 rose while sig1 high at t=%g", $abstime);
+      end else if (tf1 >= 0) begin
+        dmin = min(dmin, $abstime - tf1);
+        if ($abstime - tf1 < tmin) nshort = nshort + 1;
+      end
+    end
+
+    @(final_step)
+      $strobe("NOV_CHECK %m: overlaps=%d short_deadtimes=%d min_deadtime=%g s", nov, nshort, dmin);
+  end
+endmodule

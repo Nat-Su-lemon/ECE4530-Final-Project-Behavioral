@@ -1,0 +1,14 @@
+// ============================================================================
+// tb_L1_T1_startup.scs  -  T1 start-up (L1 averaged model)
+// Stimulus : Vin steps 0 -> VIN_FINAL (try 0.6, 1.8, 3.0), 20 mA resistive load
+// Look at  : fault release, vctrl, Vout rise time, overshoot, peak input current
+// Run      : cd sim/spectre && spectre tb_L1_T1_startup.scs
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters VIN_FINAL=1.8 TSTOP=2m RLOAD=50
+
+Vin (vin 0) vsource type=pwl wave=[0 0  10u 0  11u VIN_FINAL]
+include "l1_core.scs"
+
+tran1 tran stop=TSTOP errpreset=moderate

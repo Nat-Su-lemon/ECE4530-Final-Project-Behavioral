@@ -1,0 +1,38 @@
+# ---- Spectre / ADE simulation outputs ----
+*.raw/
+*.raw
+psf/
+simulation/
+*.log
+*.ahdlSimDB/
+ahdlSimDB/
+*.srf
+*.out
+*.fc
+*.ic
+*.dc
+spectre.out
+*.tran.tran
+
+# ---- Cadence session / lock files ----
+*.cdslck
+*.cdslck.*
+CDS.log*
+panic.log*
+.cadence/
+libManager.log*
+*.oa-
+*%
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

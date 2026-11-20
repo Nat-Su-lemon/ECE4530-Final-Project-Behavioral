@@ -1,0 +1,44 @@
+// ============================================================================
+// sw_check.va  -  TEST ONLY: forbidden switch-pair monitor
+// ----------------------------------------------------------------------------
+// Pins:  ctl_a..ctl_e (in)  switch controls (mode_route outputs or gate nodes)
+//        vdd, vss           reference for the threshold V(vdd,vss)/2
+//
+// Pairs that must NEVER conduct together (design notes p.6):
+//   a & b : Vin shorts to Vout through C1
+//   c & d : Vin shorts to ground (x2)
+//   c & e : Vout shorts to ground (x1/2)
+//   d & e : Vin shorts to Vout (only possible during a bad mode change)
+//
+// Checked whenever any control rises. Prints SW_CHECK lines to the Spectre log
+// and a summary at the end. Draws no current.
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module sw_check (ctl_a, ctl_b, ctl_c, ctl_d, ctl_e, vdd, vss);
+  input ctl_a, ctl_b, ctl_c, ctl_d, ctl_e; inout vdd, vss;
+  electrical ctl_a, ctl_b, ctl_c, ctl_d, ctl_e, vdd, vss;
+
+  integer nab, ncd, nce, nde, a, b, c, d, e;
+  real vth;
+
+  analog begin
+    vth = V(vdd, vss) / 2;
+    @(initial_step) begin nab = 0; ncd = 0; nce = 0; nde = 0; end
+
+    @(cross(V(ctl_a, vss) - vth, +1) or cross(V(ctl_b, vss) - vth, +1) or
+      cross(V(ctl_c, vss) - vth, +1) or cross(V(ctl_d, vss) - vth, +1) or
+      cross(V(ctl_e, vss) - vth, +1)) begin
+      a = (V(ctl_a, vss) > vth); b = (V(ctl_b, vss) > vth); c = (V(ctl_c, vss) > vth);
+      d = (V(ctl_d, vss) > vth); e = (V(ctl_e, vss) > vth);
+      if (a && b) begin nab = nab + 1; $strobe("SW_CHECK %m: a&b both on at t=%g", $abstime); end
+      if (c && d) begin ncd = ncd + 1; $strobe("SW_CHECK %m: c&d both on at t=%g", $abstime); end
+      if (c && e) begin nce = nce + 1; $strobe("SW_CHECK %m: c&e both on at t=%g", $abstime); end
+      if (d && e) begin nde = nde + 1; $strobe("SW_CHECK %m: d&e both on at t=%g", $abstime); end
+    end
+
+    @(final_step)
+      $strobe("SW_CHECK %m: violations a&b=%d c&d=%d c&e=%d d&e=%d", nab, ncd, nce, nde);
+  end
+endmodule

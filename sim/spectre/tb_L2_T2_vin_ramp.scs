@@ -1,0 +1,15 @@
+// ============================================================================
+// tb_L2_T2_vin_ramp.scs  -  T2 Vin ramp 0.6 -> 3 -> 0.6 V at 20 mA, switched (L2)
+// Look at  : each mode change goes mismatch -> stopped -> latch -> restart at Phi1,
+//            no SW_CHECK violations (d&e especially), Vout dip, hysteresis.
+// Note     : the ramp is compressed to ~2 ms to keep run time reasonable. Compare
+//            the mode switch points with tb_L1_T2 (they should match).
+// ============================================================================
+simulator lang=spectre
+include "common_params.scs"
+parameters TSTOP=2.2m RLOAD=50
+
+Vin (vin 0) vsource type=pwl wave=[0 0  10u 0  11u 0.6  200u 0.6  1.1m 3.0  2m 0.6  2.2m 0.6]
+include "l2_core.scs"
+
+tran1 tran stop=TSTOP errpreset=moderate

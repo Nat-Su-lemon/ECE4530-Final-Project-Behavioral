@@ -1,0 +1,69 @@
+// ============================================================================
+// en_hold.va  -  Stage 4: enable and hold gate (behavioral)
+// ----------------------------------------------------------------------------
+// Owner (real circuit): Sam          Level: L1/L2 behavioral
+// Pins:  clk       (in)  ring clock from vco (used only to time the restart)
+//        phi1_in, phi2_in (in)  ungated phases from nov_gen
+//        hold_req  (in)  1 = Vout above target, stop       (Brandon's hold comparator)
+//        fault     (in)  1 = UVLO / soft-start / OCP, stop (Alex)
+//        mismatch  (in)  1 = mode change pending, stop     (mode_route)
+//        phi1, phi2 (out) gated phases to mode_route
+//        stopped   (out) 1 = clock halted, all phases low.
+//                        Goes to mode_route (latch enable) and div2.rst.
+//        vdd, vss        logic supply
+//
+// Stop:    stop_req = hold_req OR fault OR mismatch is sampled on the FALLING
+//          edge of the ungated phi2_in. That instant is the start of the dead
+//          time before Phi1, so no switch is cut mid-conduction and the next
+//          phase to run is always Phi1. (design notes p.11-12)
+// Restart: once stop_req is clear, the gate re-opens on the next RISING edge of
+//          the ring clock. div2 is still held in reset at that instant, so it
+//          does not toggle on that edge, and the first Phi1 after restart is a
+//          full-width pulse (no runt pulse to the drivers). See DEC-010.
+//
+// Worst-case stop latency: one switching period (65 ns at 15 MHz, 10 us at 100 kHz).
+//
+// Swap target: OR (reason combiner) + sampling flop clocked by phi2_in falling
+// + synchronous release flop + gating ANDs + stopped flag (design notes p.12).
+// ============================================================================
+`include "constants.vams"
+`include "disciplines.vams"
+
+module en_hold (clk, phi1_in, phi2_in, hold_req, fault, mismatch, phi1, phi2, stopped, vdd, vss);
+  input clk, phi1_in, phi2_in, hold_req, fault, mismatch;
+  output phi1, phi2, stopped;
+  inout vdd, vss;
+  electrical clk, phi1_in, phi2_in, hold_req, fault, mismatch, phi1, phi2, stopped, vdd, vss;
+
+  parameter real tr = 50p from (0:inf);
+
+  integer a1, a2, g, stop_req;
+  real vth;
+
+  analog begin
+    vth = V(vdd, vss) / 2;
+    stop_req = (V(hold_req, vss) > vth) || (V(fault, vss) > vth) || (V(mismatch, vss) > vth);
+
+    @(initial_step) begin
+      a1 = (V(phi1_in, vss) > vth);
+      a2 = (V(phi2_in, vss) > vth);
+      g  = 0;                                 // power up stopped (acts as power-on reset)
+    end
+
+    // track the ungated phases
+    @(cross(V(phi1_in, vss) - vth, +1)) a1 = 1;
+    @(cross(V(phi1_in, vss) - vth, -1)) a1 = 0;
+    @(cross(V(phi2_in, vss) - vth, +1)) a2 = 1;
+    @(cross(V(phi2_in, vss) - vth, -1)) begin
+      a2 = 0;
+      if (stop_req) g = 0;                    // STOP: only here, inside the gap before Phi1
+    end
+
+    // RESTART: synchronous to the ring clock, only when no stop reason is left
+    @(cross(V(clk, vss) - vth, +1)) if (!g && !stop_req) g = 1;
+
+    V(phi1,    vss) <+ V(vdd, vss) * transition(a1 && g, 0, tr);
+    V(phi2,    vss) <+ V(vdd, vss) * transition(a2 && g, 0, tr);
+    V(stopped, vss) <+ V(vdd, vss) * transition(!g,      0, tr);
+  end
+endmodule

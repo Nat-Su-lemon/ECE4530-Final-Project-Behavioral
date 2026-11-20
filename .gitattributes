@@ -1,0 +1,12 @@
+# Normalize text files to LF in the repo (Linux Cadence servers + Windows laptops)
+* text=auto eol=lf
+*.va    text eol=lf
+*.scs   text eol=lf
+*.md    text eol=lf
+*.py    text eol=lf
+
+# Binary reference material
+*.pdf   binary
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
